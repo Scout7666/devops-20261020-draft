@@ -17,7 +17,9 @@ def evaluate(name, code, report):
         raise ValueError("Missing trace_id")
     attempts = report.get("attempts", [])
     if len(attempts) != 2 or [a.get("iteration") for a in attempts] != [1, 2]:
-        raise ValueError("Expected exactly two ordered build attempts")
+        detail = report.get("error", "No workflow error supplied")
+        classification = attempts[0].get("failure_class", "UNKNOWN") if attempts else "NOT_STARTED"
+        raise ValueError(f"Workflow stopped before two ordered attempts ({classification}): {detail}")
     if attempts[0].get("build_exit_code") != 1 or attempts[0].get("failure_class") != "MISSING_MAKE":
         raise ValueError("Baseline did not reach missing make; inspect network/build logs")
     if name == "build-failed":
@@ -159,7 +161,10 @@ def main():
             path = case / "candidate.Dockerfile"
             path.write_text(text, encoding="utf-8")
             expected = "intentionally wrong output" if name == "wrong-output" else "hello E3"
-            command = ["docker", "run", "--rm", "--network", "none", "--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp",
+            # Buildx may obtain registry credentials/tokens from the CLI-side
+            # session, so the service needs networking even with a host daemon.
+            # The untrusted built program is still run with --network none by auto_build.
+            command = ["docker", "run", "--rm", "--network", "bridge", "--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp",
                        "--group-add", str(Path("/var/run/docker.sock").stat().st_gid), "-v", "/var/run/docker.sock:/var/run/docker.sock",
                        "--cidfile", str(case / "service-container-id.txt"),
                        "--mount", f"type=bind,src={source},dst=/fixture,readonly",
